@@ -11,6 +11,8 @@ WINDOW_HEIGHT = 600
 GRID_SIZE = 20
 GRID_WIDTH = WINDOW_WIDTH // GRID_SIZE
 GRID_HEIGHT = WINDOW_HEIGHT // GRID_SIZE
+BASE_SPEED = 10
+SPEED_STEP = 0.5
 
 # Màu sắc
 BACKGROUND_COLOR = (244, 201, 127)  # Màu vàng nhạt
@@ -102,15 +104,26 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 36)
         self.is_running = True
-        self.reset_game()
+        self.is_paused = False
+        self.high_score = 0
         self.restart_button = Button(
-            WINDOW_WIDTH // 2 - 75, WINDOW_HEIGHT // 2 + 50, 150, 50,
-            "Restart", BUTTON_COLOR, BUTTON_HOVER_COLOR, TEXT_COLOR, self.font
+            WINDOW_WIDTH // 2 - 75,
+            WINDOW_HEIGHT // 2 + 50,
+            150,
+            50,
+            "Restart",
+            BUTTON_COLOR,
+            BUTTON_HOVER_COLOR,
+            TEXT_COLOR,
+            self.font,
         )
+        self.reset_game()
+
     def reset_game(self):
         self.snake = Snake()
         self.food = Food(self.snake)
         self.is_running = True
+        self.is_paused = False
 
     def draw_grid(self):
         for y in range(0, WINDOW_HEIGHT, GRID_SIZE):
@@ -119,8 +132,17 @@ class Game:
                 pygame.draw.rect(self.screen, GRID_COLOR, rect, 1)
 
     def draw_score(self):
-        score_text = self.font.render(f'Score: {self.snake.score}', True, TEXT_COLOR)
+        score_text = self.font.render(
+            f'Score: {self.snake.score}  Best: {self.high_score}', True, TEXT_COLOR
+        )
         self.screen.blit(score_text, (10, 10))
+
+    def draw_food(self):
+        food_center = (
+            int(self.food.position[0] * GRID_SIZE + GRID_SIZE / 2),
+            int(self.food.position[1] * GRID_SIZE + GRID_SIZE / 2),
+        )
+        pygame.draw.circle(self.screen, FOOD_COLOR, food_center, int(GRID_SIZE / 2))
 
     def draw_snake(self):
         for i, pos in enumerate(self.snake.positions):
@@ -151,10 +173,76 @@ class Game:
 
     def game_over_screen(self):
         self.screen.fill(BACKGROUND_COLOR)
-        text = self.font.render("Game Over!", True, TEXT_COLOR)
-        text_rect = text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 50))
-        self.screen.blit(text, text_rect)
+        title = self.font.render("Game Over!", True, TEXT_COLOR)
+        title_rect = title.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 80))
+        self.screen.blit(title, title_rect)
+
+        summary_lines = [
+            f"Score: {self.snake.score}",
+            f"Best: {self.high_score}",
+            "Press Enter to play again",
+            "Press Esc to quit",
+        ]
+        for idx, line in enumerate(summary_lines):
+            text = self.font.render(line, True, TEXT_COLOR)
+            text_rect = text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 20 + idx * 35))
+            self.screen.blit(text, text_rect)
+
         self.restart_button.draw(self.screen)
+        pygame.display.update()
+
+    def draw_pause_overlay(self):
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 150))
+        self.screen.blit(overlay, (0, 0))
+        pause_text = self.font.render("Paused - Press Space to resume", True, TEXT_COLOR)
+        pause_rect = pause_text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2))
+        self.screen.blit(pause_text, pause_rect)
+        pygame.display.update()
+
+    def handle_keydown(self, key):
+        if key == pygame.K_ESCAPE:
+            pygame.quit()
+            sys.exit()
+
+        if self.is_running:
+            if key == pygame.K_SPACE:
+                self.is_paused = not self.is_paused
+                return
+
+            if self.is_paused:
+                return
+
+            if key == pygame.K_UP:
+                self.snake.change_direction(UP)
+            elif key == pygame.K_DOWN:
+                self.snake.change_direction(DOWN)
+            elif key == pygame.K_LEFT:
+                self.snake.change_direction(LEFT)
+            elif key == pygame.K_RIGHT:
+                self.snake.change_direction(RIGHT)
+        else:
+            if key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_r):
+                self.reset_game()
+
+    def update_game_state(self):
+        if not self.snake.update():
+            self.is_running = False
+            self.high_score = max(self.high_score, self.snake.score)
+            return
+
+        if self.snake.get_head_position() == self.food.position:
+            self.snake.length += 1
+            self.snake.score += 10
+            self.food.randomize_position()
+            self.high_score = max(self.high_score, self.snake.score)
+
+    def render(self):
+        self.screen.fill(BACKGROUND_COLOR)
+        self.draw_grid()
+        self.draw_snake()
+        self.draw_food()
+        self.draw_score()
         pygame.display.update()
 
     def run(self):
@@ -164,39 +252,20 @@ class Game:
                     pygame.quit()
                     sys.exit()
                 elif event.type == pygame.KEYDOWN:
-                    if self.is_running:
-                        if event.key == pygame.K_UP:
-                            self.snake.change_direction(UP)
-                        elif event.key == pygame.K_DOWN:
-                            self.snake.change_direction(DOWN)
-                        elif event.key == pygame.K_LEFT:
-                            self.snake.change_direction(LEFT)
-                        elif event.key == pygame.K_RIGHT:
-                            self.snake.change_direction(RIGHT)
+                    self.handle_keydown(event.key)
                 elif not self.is_running and self.restart_button.is_clicked(event):
                     self.reset_game()
 
-            if self.is_running:
-                if not self.snake.update():
-                    self.is_running = False
+            if self.is_running and not self.is_paused:
+                self.update_game_state()
+                if not self.is_running:
                     continue
-
-                if self.snake.get_head_position() == self.food.position:
-                    self.snake.length += 1
-                    self.snake.score += 10
-                    self.food.randomize_position()
-
-                self.screen.fill(BACKGROUND_COLOR)
-                self.draw_grid()
-                self.draw_snake()
-
-                food_center = (int(self.food.position[0] * GRID_SIZE + GRID_SIZE / 2),
-                               int(self.food.position[1] * GRID_SIZE + GRID_SIZE / 2))
-                pygame.draw.circle(self.screen, FOOD_COLOR, food_center, int(GRID_SIZE / 2))
-
-                self.draw_score()
-                pygame.display.update()
-                self.clock.tick(10 + self.snake.score // 20)
+                self.render()
+                speed = BASE_SPEED + int(self.snake.score * SPEED_STEP / 10)
+                self.clock.tick(speed)
+            elif self.is_paused:
+                self.draw_pause_overlay()
+                self.clock.tick(10)
             else:
                 self.game_over_screen()
 
